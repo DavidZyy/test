@@ -1,0 +1,51 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "C++ Debug",
+            "type": "cppdbg",
+            "request": "launch",
+            // "program": "${workspaceFolder}/build/src/language/cpp/${fileBasenameNoExtension}", // Path to your C++ executable
+            "program": "${workspaceFolder}/build/${relativeFileDirname}/${fileBasenameNoExtension}",
+            "args": ["run",
+                     "ls",
+                     "-l"
+            ], // Command-line arguments for your program (if any)
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}",
+            "environment": [],
+            "externalConsole": false,
+            "MIMode": "gdb",
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            // "preLaunchTask": "build", // Name of the build task to run before debugging
+            "miDebuggerPath": "/usr/bin/gdb", // Path to your gdb executable
+            "setupCommands": [
+                {
+                    "description": "Enable pretty-printing for gdb",
+                    "text": "-enable-pretty-printing",
+                    "ignoreFailures": true
+                }
+            ],
+            "logging": {
+                "engineLogging": true,
+                "programOutput": "${workspaceFolder}/build/debug.log",
+                "trace": true
+            },
+            "logging": {
+                // "moduleLoad": false,
+                // "programOutput": false,
+                // "trace": false,
+                // "engineLogging": false,
+                // "exceptions": false
+            },
+            "stopOnError": false,
+            "showDevTools": "never"
+        }
+    ]
+}

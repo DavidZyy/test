@@ -1,0 +1,1 @@
+mpicxx -o hello_mpi mpi.cpp

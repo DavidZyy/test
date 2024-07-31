@@ -1,0 +1,5 @@
+/venv
+*.o
+/data
+src/language/python/data
+/build
