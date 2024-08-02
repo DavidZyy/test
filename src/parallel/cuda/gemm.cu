@@ -112,6 +112,7 @@ void gemm_cuda_cublas(float* A, float* B, float* C, int M, int N, int K) {
 }
 
 /************************************** reg tile *********************************************/
+// #define reg_tile_size 1
 // #define reg_tile_size 2
 #define reg_tile_size 4
 
@@ -145,22 +146,23 @@ __global__ void gemm_kernel_reg_tile(float* A, float* B, float* C, int M, int N,
             b[j] = B[k * N + (col * reg_tile_size + j)];
         }
 
+        // out prod of matmul
         for (int y = 0; y < reg_tile_size; ++y) {
             for (int x = 0; x < reg_tile_size; ++x) {
                 c[y][x] += a[y] * b[x];
             }
         }
 
-        // set C
-        for (int y = 0; y < reg_tile_size; ++y) {
-            for (int x = 0; x < reg_tile_size; ++x) {
-                C[(row * reg_tile_size + y) * N + (col * reg_tile_size + x)] = c[y][x];
-                // printf c[y][x]
-                // printf("%f\n", c[y][x]);
-            }
-        }
     }
 
+    // set C
+    for (int y = 0; y < reg_tile_size; ++y) {
+        for (int x = 0; x < reg_tile_size; ++x) {
+            C[(row * reg_tile_size + y) * N + (col * reg_tile_size + x)] = c[y][x];
+            // printf c[y][x]
+            // printf("%f\n", c[y][x]);
+        }
+    }
 }
 
 void gemm_cuda_reg_tile(float* A, float* B, float* C, int M, int N, int K) {
