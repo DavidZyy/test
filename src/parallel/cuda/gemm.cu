@@ -9,11 +9,13 @@
  * reference: https://dlsyscourse.org/slides/12-gpu-acceleration.pdf
  */
 
+#include <cassert>
 #include <cstdio>
 #include <iostream>
 #include <cuda_runtime.h>
 #include <cublas_v2.h>
 
+/* threads num in x, y direction */
 // #define TILE_SIZE 2
 #define TILE_SIZE 16
 
@@ -61,10 +63,6 @@ void gemm_cuda_naive(float* A, float* B, float* C, int M, int N, int K) {
     CUDA_CHECK(cudaMalloc((void**)&d_A, size_A));
     CUDA_CHECK(cudaMalloc((void**)&d_B, size_B));
     CUDA_CHECK(cudaMalloc((void**)&d_C, size_C));
-
-    // CUDA_CHECK(cudaMallocManaged((void**)&d_A, size_A));
-    // CUDA_CHECK(cudaMallocManaged((void**)&d_B, size_B));
-    // CUDA_CHECK(cudaMallocManaged((void**)&d_C, size_C));
 
     CUDA_CHECK(cudaMemcpy(d_A, A, size_A, cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_B, B, size_B, cudaMemcpyHostToDevice));
@@ -115,6 +113,7 @@ void gemm_cuda_cublas(float* A, float* B, float* C, int M, int N, int K) {
 // #define reg_tile_size 1
 // #define reg_tile_size 2
 #define reg_tile_size 4
+// #define reg_tile_size 8
 
 // __device__ void get_slice() {
 //     for (int i = 0; i < reg_tile_size; ++i) {
@@ -137,11 +136,11 @@ __global__ void gemm_kernel_reg_tile(float* A, float* B, float* C, int M, int N,
     // use out prod to compute gemm
     for (int k = 0; k < K; ++k) {
 
-        // get a
+        // get a, regard a as row vector
         for (int i = 0; i < reg_tile_size; ++i) {
             a[i] = A[(row * reg_tile_size + i) * K + k];
         }
-        // get b
+        // get b, regard b as col vector
         for (int j = 0; j < reg_tile_size; ++j) {
             b[j] = B[k * N + (col * reg_tile_size + j)];
         }
@@ -165,6 +164,9 @@ __global__ void gemm_kernel_reg_tile(float* A, float* B, float* C, int M, int N,
     }
 }
 
+/**
+ * partition matrix by threads
+ */
 void gemm_cuda_reg_tile(float* A, float* B, float* C, int M, int N, int K) {
     float *d_A, *d_B, *d_C;
     size_t size_A = M * K * sizeof(float);
@@ -175,10 +177,6 @@ void gemm_cuda_reg_tile(float* A, float* B, float* C, int M, int N, int K) {
     CUDA_CHECK(cudaMalloc((void**)&d_B, size_B));
     CUDA_CHECK(cudaMalloc((void**)&d_C, size_C));
 
-    // CUDA_CHECK(cudaMallocManaged((void**)&d_A, size_A));
-    // CUDA_CHECK(cudaMallocManaged((void**)&d_B, size_B));
-    // CUDA_CHECK(cudaMallocManaged((void**)&d_C, size_C));
-
     CUDA_CHECK(cudaMemcpy(d_A, A, size_A, cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_B, B, size_B, cudaMemcpyHostToDevice));
 
@@ -186,6 +184,107 @@ void gemm_cuda_reg_tile(float* A, float* B, float* C, int M, int N, int K) {
     dim3 dimGrid((N + TILE_SIZE - 1) / TILE_SIZE / reg_tile_size, (M + TILE_SIZE - 1) / TILE_SIZE / reg_tile_size);
     
     gemm_kernel_reg_tile<<<dimGrid, dimBlock>>>(d_A, d_B, d_C, M, N, K);
+    CUDA_CHECK(cudaGetLastError());
+
+    CUDA_CHECK(cudaMemcpy(C, d_C, size_C, cudaMemcpyDeviceToHost));
+
+    CUDA_CHECK(cudaFree(d_A));
+    CUDA_CHECK(cudaFree(d_B));
+    CUDA_CHECK(cudaFree(d_C));
+}
+
+__global__ void gemm_kernel_sm_tile(float* A, float* B, float* C, int M, int N, int K) {
+    // int yblock = blockIdx.y;
+    // int xblock = blockIdx.x;
+
+    int row = blockIdx.y * blockDim.y + threadIdx.y;
+    int col = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // local memory
+    float a[reg_tile_size];
+    float b[reg_tile_size];
+    float c[reg_tile_size][reg_tile_size] = {0};
+
+    // shared memory
+    __shared__ float s_A[TILE_SIZE * reg_tile_size][TILE_SIZE];
+    __shared__ float s_B[TILE_SIZE][TILE_SIZE * reg_tile_size];
+
+    int S = blockDim.x;
+    // int L = blockDim.y * reg_tile_size;
+
+    for (int k = 0; k < K; k += S) {
+        __syncthreads();
+        // cooperate fetching memory of s_A and s_B to shared memory
+        for (int i = 0; i < reg_tile_size; ++i) {
+            // s_A[threadIdx.y + i][threadIdx.x] = A[(row * reg_tile_size + i) * K + (k + threadIdx.x)];
+            s_A[threadIdx.y * reg_tile_size + i][threadIdx.x] = A[(row * reg_tile_size + i) * K + (k + threadIdx.x)];
+            // assert s_A == 1
+            // assert(s_A[threadIdx.y * reg_tile_size + i][threadIdx.x] == 1);
+        }
+        for (int i = 0; i < reg_tile_size; ++i) {
+            // s_B[threadIdx.y][threadIdx.x + i] = B[(k + threadIdx.y) * N + (col * reg_tile_size + i)];
+            s_B[threadIdx.y][threadIdx.x * reg_tile_size + i] = B[(k + threadIdx.y) * N + (col * reg_tile_size + i)];
+            // assert(s_B[threadIdx.y][threadIdx.x * reg_tile_size + i] == 1);
+        }
+        __syncthreads();
+
+        // get all vectors in shared memory and calculate out prod
+        for (int i = 0; i < S; ++i) {
+            // get a
+            for (int j = 0; j < reg_tile_size; ++j) {
+                // a[j] = s_A[threadIdx.y * reg_tile_size + j][threadIdx.x + i];
+                a[j] = s_A[threadIdx.y * reg_tile_size + j][i];
+                // assert(a[j] == 1);
+            }
+            // get b
+            for (int j = 0; j < reg_tile_size; ++j) {
+                // b[j] = s_B[threadIdx.y + i][threadIdx.x * reg_tile_size + j];
+                b[j] = s_B[i][threadIdx.x * reg_tile_size + j];
+                // assert(b[j] == 1);
+            }
+
+            // calculate out prod
+            for (int y = 0; y < reg_tile_size; ++y) {
+                for (int x = 0; x < reg_tile_size; ++x) {
+                    c[y][x] += a[y] * b[x];
+                }
+            }
+        }
+
+    }
+
+    // set C
+    for (int y = 0; y < reg_tile_size; ++y) {
+        for (int x = 0; x < reg_tile_size; ++x) {
+            C[(row * reg_tile_size + y) * N + (col * reg_tile_size + x)] = c[y][x];
+            // printf("%f\n", c[y][x]);
+        }
+    }
+}
+
+/**
+ * shared memory tile
+ * partition matrix by blocks, and then partition the submatrix by threads
+ */
+void gemm_cuda_sm_tile(float* A, float* B, float* C, int M, int N, int K) {
+    float *d_A, *d_B, *d_C;
+    size_t size_A = M * K * sizeof(float);
+    size_t size_B = K * N * sizeof(float);
+    size_t size_C = M * N * sizeof(float);
+
+    CUDA_CHECK(cudaMalloc((void**)&d_A, size_A));
+    CUDA_CHECK(cudaMalloc((void**)&d_B, size_B));
+    CUDA_CHECK(cudaMalloc((void**)&d_C, size_C));
+
+    CUDA_CHECK(cudaMemcpy(d_A, A, size_A, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_B, B, size_B, cudaMemcpyHostToDevice));
+
+    dim3 dimBlock(TILE_SIZE, TILE_SIZE);
+    dim3 dimGrid((N + TILE_SIZE - 1) / TILE_SIZE / reg_tile_size, (M + TILE_SIZE - 1) / TILE_SIZE / reg_tile_size);
+    // dim3 dimBlock(2, 2);
+    // dim3 dimGrid(2, 2);
+    
+    gemm_kernel_sm_tile<<<dimGrid, dimBlock>>>(d_A, d_B, d_C, M, N, K);
     CUDA_CHECK(cudaGetLastError());
 
     CUDA_CHECK(cudaMemcpy(C, d_C, size_C, cudaMemcpyDeviceToHost));

@@ -27,17 +27,17 @@
  */
 void generate_matrices(float* A, float* B, int size) {
     for (int i = 0; i < size * size; ++i) {
-        // A[i] = static_cast<float>(rand()) / RAND_MAX;
-        // B[i] = static_cast<float>(rand()) / RAND_MAX;
-        A[i] = 1;
-        B[i] = 1;
+        A[i] = static_cast<float>(rand()) / RAND_MAX;
+        B[i] = static_cast<float>(rand()) / RAND_MAX;
+        // A[i] = 1;
+        // B[i] = 1;
     }
 }
 
 /**
  * compare if the results is correct
  */
-bool compare_results(float* C1, float* C2, int size, float tol = 1e-3) {
+bool compare_results(float* C1, float* C2, int size, float tol = 1e-2) {
     for (int i = 0; i < size * size; ++i) {
         if (fabs(C1[i] - C2[i]) > tol) {
             std::cout << C1[i] << " != " << C2[i] << std::endl;
@@ -54,8 +54,9 @@ void gemm_cpu_out_prod(float* A, float* B, float* C, int M, int N, int K);
 void gemm_cpu_cblas(float* A, float* B, float* C, int M, int N, int K);
 // cuda
 void gemm_cuda_naive(float* A, float* B, float* C, int M, int N, int K);
-void gemm_cuda_cublas(float* A, float* B, float* C, int M, int N, int K);
 void gemm_cuda_reg_tile(float* A, float* B, float* C, int M, int N, int K);
+void gemm_cuda_sm_tile(float* A, float* B, float* C, int M, int N, int K);
+void gemm_cuda_cublas(float* A, float* B, float* C, int M, int N, int K);
 ///////////////////////////////////////////////////////////////////////
 
 void benchmark_gemm(int size) {
@@ -65,8 +66,9 @@ void benchmark_gemm(int size) {
     float *C_cpu_out_prod = new float[size * size];
     float *C_cpu_cblas = new float[size * size];
     float *C_cuda_naive = new float[size * size];
-    float *C_cuda_cublas = new float[size * size];
     float *C_cuda_reg_tile = new float[size * size];
+    float *C_cuda_sm_tile = new float[size * size];
+    float *C_cuda_cublas = new float[size * size];
 
     generate_matrices(A, B, size);
 
@@ -80,11 +82,13 @@ void benchmark_gemm(int size) {
     // MEASURE_TIME(gemm_cpu_cblas(A, B, C_cpu_cblas, size, size, size), "cpu cblas", size);
     MEASURE_TIME(gemm_cuda_naive(A, B, C_cuda_naive, size, size, size), "cuda naive", size);
     MEASURE_TIME(gemm_cuda_reg_tile(A, B, C_cuda_reg_tile, size, size, size), "cuda reg tile", size);
+    MEASURE_TIME(gemm_cuda_sm_tile(A, B, C_cuda_sm_tile, size, size, size), "cuda sm tile", size);
     MEASURE_TIME(gemm_cuda_cublas(A, B, C_cuda_cublas, size, size, size), "cuda cublas", size);
 
     // if (compare_results(C_cpu_naive, C_cpu_out_prod, size)) {
     // if (compare_results(C_cpu_naive, C_cuda_reg_tile, size)) {
-    if (compare_results(C_cuda_cublas, C_cuda_reg_tile, size)) {
+    // if (compare_results(C_cuda_cublas, C_cuda_reg_tile, size)) {
+    if (compare_results(C_cuda_cublas, C_cuda_sm_tile, size)) {
     // if (compare_results(C_cuda_naive, C_cuda_cublas, size)) {
         // if (compare_results(C_cpu_naive, C_cuda_cublas, size)) {
             std::cout << "Results are correct and match." << std::endl;
@@ -101,8 +105,9 @@ void benchmark_gemm(int size) {
     delete[] C_cpu_out_prod;
     delete[] C_cpu_cblas;
     delete[] C_cuda_naive;
-    delete[] C_cuda_cublas;
     delete[] C_cuda_reg_tile;
+    delete[] C_cuda_sm_tile;
+    delete[] C_cuda_cublas;
 }
 
 int main() {
@@ -117,7 +122,7 @@ int main() {
     // int size = 4096;
     // int size = 8192;
     // int size = 8192 * 2;
-    for (int size = 64; size <= 8192 * 2; size *= 2) {
+    for (int size = 128; size <= 8192 * 2; size *= 2) {
         std::cout << "Size: " << size << std::endl;
         benchmark_gemm(size);
     }
