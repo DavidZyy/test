@@ -7,10 +7,10 @@
             "request": "launch",
             // "program": "${workspaceFolder}/build/src/language/cpp/${fileBasenameNoExtension}", // Path to your C++ executable
             "program": "${workspaceFolder}/build/${relativeFileDirname}/${fileBasenameNoExtension}",
-            "args": ["run",
-                     "ls",
-                     "-l"
-            ], // Command-line arguments for your program (if any)
+            // "args": ["run",
+            //          "ls",
+            //          "-l"
+            // ], // Command-line arguments for your program (if any)
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}",
             "environment": [],

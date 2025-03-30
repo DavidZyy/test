@@ -1,8 +1,11 @@
-NAME  = test_cuda_gemm
-SRC_DIR  = src/parallel/cuda
+NAME  = stream
+SRC_DIR  = src/parallel/cuda/
 
-# SRC_FILE = $(SRC_DIR)$(NAME).cpp
-SRC_FILE = $(wildcard $(SRC_DIR)/*) 
+# NAME = leco54
+# SRC_DIR = src/algo/
+
+SRC_FILE = $(SRC_DIR)$(NAME).cu
+# SRC_FILE = $(wildcard $(SRC_DIR)/*) 
 
 BUILD = build/
 OBJ = $(BUILD)$(SRC_DIR)$(NAME)
@@ -13,7 +16,8 @@ CXX = nvcc
 # CXXFLAGS = -std=c++98 -Wall -Wextra -g
 # CXXFLAGS = -Wall -Wextra -g -std=c++20
 # CXXFLAGS = -lcublas -ccbin clang-14
-CXXFLAGS = -lcublas -lopenblas -ccbin g++
+# CXXFLAGS = -lcublas -lopenblas -ccbin g++
+CXXFLAGS = -lcublas -lcudart
 
 
 # $(error $(OBJ))
