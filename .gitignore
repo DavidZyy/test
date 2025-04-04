@@ -3,3 +3,4 @@
 /data
 src/language/python/data
 /build
+*.nsys-rep

@@ -1,112 +1,132 @@
+// overlap gpu data transfer and kernel execution
+
 #include <cuda_runtime.h>
 #include <stdio.h>
+#include <time.h>
 
-__global__ void multiply(float *x, float *y, float *out, int n) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < n) out[i] = x[i] * y[i];
+#define CUDA_CHECK(call) \
+    do { \
+        cudaError_t err = call; \
+        if (err != cudaSuccess) { \
+            fprintf(stderr, "CUDA error in %s:%d: %s\n", \
+                   __FILE__, __LINE__, cudaGetErrorString(err)); \
+            exit(EXIT_FAILURE); \
+        } \
+    } while(0)
+
+__global__ void computeKernel(float* data, int size) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < size) {
+        data[idx] = data[idx] * 2.0f;
+    }
 }
 
-__global__ void add(float *a, float *b, float *out, int n) {
-    int i = blockIdx.x * blockDim.x + threadIdx.x;
-    if (i < n) out[i] = a[i] + b[i];
-}
-
-// 不使用流的情况
-float no_stream(float *x, float *y, float *w, float *z, float *temp, int n, dim3 grid, dim3 block) {
+void runSameStream(float* h_input, float* h_output, float* d_input, int size, int gridSize, int blockSize) {
     cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-
-    cudaEventRecord(start, 0);
-    multiply<<<grid, block>>>(x, y, temp, n);  // 默认流
-    add<<<grid, block>>>(temp, w, z, n);       // 默认流
-    cudaEventRecord(stop, 0);
-
-    cudaEventSynchronize(stop);
+    CUDA_CHECK(cudaEventCreate(&start));
+    CUDA_CHECK(cudaEventCreate(&stop));
     float milliseconds = 0;
-    cudaEventElapsedTime(&milliseconds, start, stop);
 
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
-    return milliseconds / 1000.0f;  // 转换为秒
+    CUDA_CHECK(cudaMemcpy(d_input, h_input, size * sizeof(float), cudaMemcpyHostToDevice));
+    
+    printf("Testing kernel and memcpy in same stream...\n");
+    CUDA_CHECK(cudaEventRecord(start));
+    computeKernel<<<gridSize, blockSize>>>(d_input, size);
+    CUDA_CHECK(cudaGetLastError());
+    CUDA_CHECK(cudaMemcpy(h_output, d_input, size * sizeof(float), cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaEventRecord(stop));
+    CUDA_CHECK(cudaEventSynchronize(stop));
+    CUDA_CHECK(cudaEventElapsedTime(&milliseconds, start, stop));
+    printf("Time for same stream: %.2f ms\n", milliseconds);
+
+    CUDA_CHECK(cudaEventDestroy(start));
+    CUDA_CHECK(cudaEventDestroy(stop));
 }
 
-// 使用流的情况
-float with_streams(float *x, float *y, float *w, float *z, float *temp, int n, dim3 grid, dim3 block) {
+void runDifferentStreams(float* h_input, float* h_output, float* d_input, int size, int gridSize, int blockSize) {
     cudaStream_t stream1, stream2;
-    cudaStreamCreate(&stream1);
-    cudaStreamCreate(&stream2);
-
-    cudaEvent_t start, stop;
-    cudaEventCreate(&start);
-    cudaEventCreate(&stop);
-
-    cudaEventRecord(start, 0);
-    multiply<<<grid, block, 0, stream1>>>(x, y, temp, n);  // stream1
-    add<<<grid, block, 0, stream2>>>(temp, w, z, n);       // stream2
-    cudaEventRecord(stop, 0);
-
-    cudaStreamSynchronize(stream1);
-    cudaStreamSynchronize(stream2);
-
+    cudaEvent_t start, stop, kernelDone;
+    CUDA_CHECK(cudaStreamCreate(&stream1));
+    CUDA_CHECK(cudaStreamCreate(&stream2));
+    CUDA_CHECK(cudaEventCreate(&start));
+    CUDA_CHECK(cudaEventCreate(&stop));
+    CUDA_CHECK(cudaEventCreate(&kernelDone));
     float milliseconds = 0;
-    cudaEventElapsedTime(&milliseconds, start, stop);
 
-    cudaStreamDestroy(stream1);
-    cudaStreamDestroy(stream2);
-    cudaEventDestroy(start);
-    cudaEventDestroy(stop);
-    return milliseconds / 1000.0f;  // 转换为秒
+    CUDA_CHECK(cudaMemcpy(d_input, h_input, size * sizeof(float), cudaMemcpyHostToDevice));
+    
+    printf("\nTesting kernel and memcpy in different streams...\n");
+    CUDA_CHECK(cudaEventRecord(start, stream1));
+    
+    computeKernel<<<gridSize, blockSize, 0, stream1>>>(d_input, size);
+    // CUDA_CHECK(cudaEventRecord(kernelDone, stream1));  // 标记kernel完成
+    
+    // 确保memcpy在kernel完成后执行
+    // CUDA_CHECK(cudaStreamWaitEvent(stream2, kernelDone, 0));
+    CUDA_CHECK(cudaMemcpyAsync(h_output, d_input, size * sizeof(float), cudaMemcpyDeviceToHost, stream2));
+    
+    CUDA_CHECK(cudaEventRecord(stop, stream2));
+    CUDA_CHECK(cudaStreamSynchronize(stream1));
+    CUDA_CHECK(cudaStreamSynchronize(stream2));
+    CUDA_CHECK(cudaEventElapsedTime(&milliseconds, start, stop));
+    printf("Time for different streams: %.2f ms\n", milliseconds);
+
+    CUDA_CHECK(cudaStreamDestroy(stream1));
+    CUDA_CHECK(cudaStreamDestroy(stream2));
+    CUDA_CHECK(cudaEventDestroy(start));
+    CUDA_CHECK(cudaEventDestroy(stop));
+    CUDA_CHECK(cudaEventDestroy(kernelDone));
 }
 
 int main() {
-    int n = 1 << 20;  // 1M 元素
-    float *x, *y, *w, *z, *temp;
+    const int SIZE = 1 << 30;
+    const int BLOCK_SIZE = 256;
+    const int GRID_SIZE = (SIZE + BLOCK_SIZE - 1) / BLOCK_SIZE;
 
-    // 分配显存
-    cudaMalloc(&x, n * sizeof(float));
-    cudaMalloc(&y, n * sizeof(float));
-    cudaMalloc(&w, n * sizeof(float));
-    cudaMalloc(&z, n * sizeof(float));
-    cudaMalloc(&temp, n * sizeof(float));
-
-    // 初始化数据（简单填充）
-    float *h_x = (float*)malloc(n * sizeof(float));
-    for (int i = 0; i < n; i++) {
-        h_x[i] = 1.0f;
+    float *h_input = (float*)malloc(SIZE * sizeof(float));
+    float *h_output = (float*)malloc(SIZE * sizeof(float));
+    for (int i = 0; i < SIZE; i++) {
+        h_input[i] = (float)i;
     }
-    cudaMemcpy(x, h_x, n * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(y, h_x, n * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(w, h_x, n * sizeof(float), cudaMemcpyHostToDevice);
-    free(h_x);
 
-    // 设置线程块和网格
-    dim3 block(256);
-    dim3 grid((n + block.x - 1) / block.x);
+    float *d_input;
+    CUDA_CHECK(cudaMalloc(&d_input, SIZE * sizeof(float)));
 
-    // 测试多次取平均值
-    int num_runs = 10;
-    float no_stream_time = 0.0f;
-    float with_streams_time = 0.0f;
+    // 预热GPU，避免初始化开销影响测量
+    computeKernel<<<GRID_SIZE, BLOCK_SIZE>>>(d_input, SIZE);
+    CUDA_CHECK(cudaDeviceSynchronize());
 
-    for (int i = 0; i < num_runs; i++) {
-        no_stream_time += no_stream(x, y, w, z, temp, n, grid, block);
-        with_streams_time += with_streams(x, y, w, z, temp, n, grid, block);
+    // 运行测试
+    runSameStream(h_input, h_output, d_input, SIZE, GRID_SIZE, BLOCK_SIZE);
+    runDifferentStreams(h_input, h_output, d_input, SIZE, GRID_SIZE, BLOCK_SIZE);
+    
+    // 验证结果
+    bool correct = true;
+    for (int i = 0; i < SIZE; i++) {
+        if (h_output[i] != h_input[i] * 2.0f) {
+            correct = false;
+            break;
+        }
     }
-    no_stream_time /= num_runs;
-    with_streams_time /= num_runs;
+    printf("Same stream verification: %s\n", correct ? "PASS" : "FAIL");
 
-    // 输出结果
-    printf("不使用CUDA流平均时间: %.6f 秒\n", no_stream_time);
-    printf("使用CUDA流平均时间: %.6f 秒\n", with_streams_time);
-    printf("时间差异: %.6f 秒\n", no_stream_time - with_streams_time);
+    runSameStream(h_input, h_output, d_input, SIZE, GRID_SIZE, BLOCK_SIZE);
+    runDifferentStreams(h_input, h_output, d_input, SIZE, GRID_SIZE, BLOCK_SIZE);
+    
+    // 验证结果
+    correct = true;
+    for (int i = 0; i < SIZE; i++) {
+        if (h_output[i] != h_input[i] * 2.0f) {
+            correct = false;
+            break;
+        }
+    }
+    printf("Different streams verification: %s\n", correct ? "PASS" : "FAIL");
 
     // 清理
-    cudaFree(x);
-    cudaFree(y);
-    cudaFree(w);
-    cudaFree(z);
-    cudaFree(temp);
+    CUDA_CHECK(cudaFree(d_input));
+    free(h_input);
+    free(h_output);
 
     return 0;
 }

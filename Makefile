@@ -1,4 +1,5 @@
-NAME  = stream
+# NAME  = 2
+NAME  = speed
 SRC_DIR  = src/parallel/cuda/
 
 # NAME = leco54
