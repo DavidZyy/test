@@ -3,7 +3,7 @@ from pulp import LpProblem, LpMinimize, LpVariable, LpStatus
 # 参数
 L = 32  # 总层数
 G = 12   # GPU 容量
-k = 1   # GPU 加载速度倍数
+k = 0.2  # GPU 加载速度 / CPU 计算速度
 
 # 枚举 n 的范围
 n_max = L  # 最大可能的重复次数
