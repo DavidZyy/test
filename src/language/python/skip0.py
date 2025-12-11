@@ -77,8 +77,13 @@ def solve_min_cumulative_sum(A, k):
                     continue
 
                 # 检查前一个状态是否选择了 a_{i-L}
+                # 这个地方有错误！！不应该这么做！！会漏掉情况!
+                # if choice[prev_i][prev_j] > 0:
+                #     continue
+
+                a = dp[prev_i][prev_j]
                 if choice[prev_i][prev_j] > 0:
-                    continue
+                    a = dp[prev_i-1][prev_j]
                 
                 # 计算这个新块 (a_{i-L+1} ... a_i) 的成本
                 # Cost(s, e) = (PP[e] - PP[s-1]) - L * P[s-1]
@@ -86,7 +91,7 @@ def solve_min_cumulative_sum(A, k):
                 block_cost = (PP[i] - PP[prev_i]) - L * P[prev_i]
                 
                 # 总成本 = 前一个状态的成本 + 新块的成本
-                cost_with_block = dp[prev_i][prev_j] + block_cost
+                cost_with_block = a + block_cost
                 
                 # 如果这个新成本更优
                 if cost_with_block < dp[i][j]:
@@ -139,13 +144,13 @@ def solve_min_cumulative_sum(A, k):
 # 块 {a_2, a_3}: (1) + (1+2) = 4
 # 块 {a_6}: (1)
 # 总和 = 5
-A1 = [10, 1, 2, 20, 30, 1]
-k1 = 3
-min_sum1, indices1 = solve_min_cumulative_sum(A1, k1)
-print(f"序列 A1: {A1}, k = {k1}")
-print(f"最小总和: {min_sum1}")
-print(f"选择的索引 (1-based): {indices1}")
-print("-" * 20)
+# A1 = [10, 1, 2, 20, 30, 1]
+# k1 = 3
+# min_sum1, indices1 = solve_min_cumulative_sum(A1, k1)
+# print(f"序列 A1: {A1}, k = {k1}")
+# print(f"最小总和: {min_sum1}")
+# print(f"选择的索引 (1-based): {indices1}")
+# print("-" * 20)
 
 # 示例 2: A = [10, 10, 1, 1, 1, 10, 10], k = 4
 # 预期最优解：选择中间的 {1, 1, 1} 和另一个 10
@@ -153,26 +158,38 @@ print("-" * 20)
 # 块 {a_2} = {10}: 10
 # 总和 = 16
 # (如果选 {a_1} = 10，总和也是 16)
-A2 = [10, 10, 1, 1, 1, 10, 10]
-k2 = 4
-min_sum2, indices2 = solve_min_cumulative_sum(A2, k2)
-print(f"序列 A2: {A2}, k = {k2}")
-print(f"最小总和: {min_sum2}")
-print(f"选择的索引 (1-based): {indices2}")
-print("-" * 20)
+# A2 = [10, 10, 1, 1, 1, 10, 10]
+# k2 = 4
+# min_sum2, indices2 = solve_min_cumulative_sum(A2, k2)
+# print(f"序列 A2: {A2}, k = {k2}")
+# print(f"最小总和: {min_sum2}")
+# print(f"选择的索引 (1-based): {indices2}")
+# print("-" * 20)
 
 # 示例 3: (来自您的提问) A = [a1, a2, a3, a4, a5, a6, a7, a8]
 # 选择 a1, a3, a4, a5, a7, a8 (k=6)
 # 假设 A = [10, 99, 1, 1, 1, 99, 1, 1] (设置 a2, a6 为高成本)
-A3 = [10, 99, 1, 1, 1, 99, 1, 1]
-k3 = 6
-min_sum3, indices3 = solve_min_cumulative_sum(A3, k3)
-print(f"序列 A3: {A3}, k = {k3}")
-print(f"最小总和: {min_sum3}")
-print(f"选择的索引 (1-based): {indices3}")
+# A3 = [10, 99, 1, 1, 1, 99, 1, 1]
+# k3 = 6
+# min_sum3, indices3 = solve_min_cumulative_sum(A3, k3)
+# print(f"序列 A3: {A3}, k = {k3}")
+# print(f"最小总和: {min_sum3}")
+# print(f"选择的索引 (1-based): {indices3}")
 # 预期成本:
 # 块 {a1}: 10
 # 块 {a3, a4, a5}: (1) + (1+1) + (1+1+1) = 1 + 2 + 3 = 6
 # 块 {a7, a8}: (1) + (1+1) = 1 + 2 = 3
 # 总和 = 10 + 6 + 3 = 19
 # 预期索引: [1, 3, 4, 5, 7, 8]
+
+
+A3 = [10, 99, 1, 1, 1, 99, 1, 1, 2, 2, 6, 7, 2, 9]
+k3 = 10
+# A3 = [10, 99, 1, 1, 1, 99, 1, 1, 2, 2]
+# k3 = 8
+# A3 = [10, 99, 1, 1, 1, 99, 1, 1, 2, 2, 6, 7]
+# k3 = 8
+min_sum3, indices3 = solve_min_cumulative_sum(A3, k3)
+print(f"序列 A3: {A3}, k = {k3}")
+print(f"最小总和: {min_sum3}")
+print(f"选择的索引 (1-based): {indices3}")
