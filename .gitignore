@@ -4,3 +4,4 @@
 src/language/python/data
 /build
 *.nsys-rep
+__pycache__
